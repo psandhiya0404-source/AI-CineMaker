@@ -1,106 +1,133 @@
 const axios = require('axios');
 
 class VideoProvider {
-  /**
-   * Generate video clip for a scene given character references, scene image, action, camera direction and motion.
-   * @param {Object} params - { scene, imageUrl, characterReferences, motionPrompt, duration }
-   * @returns {Promise<{ videoUrl: string, provider: string, duration: number }>}
-   */
-  async generateSceneVideo({ scene, imageUrl, characterReferences = [], motionPrompt = '', duration = 4 }) {
-    const cameraMotion = scene.camera?.movement || 'Slow Push-In';
-    const actionDesc = scene.action || 'Characters in realistic cinematic scene';
-    const compiledMotionPrompt = `Live-action film scene: ${actionDesc}. Camera motion: ${cameraMotion}. Dynamic photorealistic motion, seamless cinematic 24fps 4k. ${motionPrompt}`;
 
-    // 1. Check for Runway Gen-3 API
+  async generateSceneVideo({
+    scene,
+    imageUrl,
+    characterReferences = [],
+    motionPrompt = '',
+    duration = 5
+  }) {
+
+    const cameraMotion = scene.camera?.movement || 'Slow Push-In';
+    const actionDesc =
+      scene.action || 'Characters in a realistic cinematic live-action scene';
+
+    const compiledMotionPrompt =
+      `Cinematic live-action scene. ${actionDesc}. ` +
+      `Camera movement: ${cameraMotion}. ` +
+      `Natural realistic motion, photorealistic, dramatic cinematic lighting. ` +
+      `${motionPrompt}`;
+
+    // REAL AI VIDEO GENERATION
     if (process.env.RUNWAY_API_KEY) {
       try {
-        return await this.generateWithRunway({ imageUrl, motionPrompt: compiledMotionPrompt, duration });
+        return await this.generateWithRunway({
+          imageUrl,
+          motionPrompt: compiledMotionPrompt,
+          duration
+        });
       } catch (err) {
-        console.warn('[VideoProvider] Runway API failed, using standard cinematic video pipeline:', err.message);
+        console.error(
+          '[VideoProvider] Runway failed:',
+          err.response?.data || err.message
+        );
+
+        throw new Error(
+          'AI video generation failed. Please check RUNWAY_API_KEY.'
+        );
       }
     }
 
-    // 2. Check for Kling API
-    if (process.env.KLING_API_KEY) {
-      try {
-        return await this.generateWithKling({ imageUrl, motionPrompt: compiledMotionPrompt, duration });
-      } catch (err) {
-        console.warn('[VideoProvider] Kling API failed, using standard cinematic video pipeline:', err.message);
-      }
-    }
-
-    // 3. Resilient High-Grade Cinematic Video Engine
-    // Real, playable high-definition cinematic live action video clip samples matching mood
-    const cinematicVideoLibrary = [
-      'https://assets.mixkit.co/videos/preview/mixkit-man-walking-down-a-dark-street-at-night-42617-large.mp4',
-      'https://assets.mixkit.co/videos/preview/mixkit-detective-examining-clues-in-an-office-42792-large.mp4',
-      'https://assets.mixkit.co/videos/preview/mixkit-dramatic-face-of-a-man-in-low-light-42621-large.mp4',
-      'https://assets.mixkit.co/videos/preview/mixkit-car-driving-in-the-rain-at-night-41584-large.mp4',
-      'https://assets.mixkit.co/videos/preview/mixkit-man-looking-through-a-window-in-the-dark-42618-large.mp4',
-      'https://assets.mixkit.co/videos/preview/mixkit-woman-walking-in-a-moody-cinematic-setting-42619-large.mp4'
-    ];
-
-    // Pick a video matching scene context or fallback
-    let videoUrl = cinematicVideoLibrary[0];
-    const locLower = (scene.location || '').toLowerCase();
-    const actLower = (scene.action || '').toLowerCase();
-
-    if (locLower.includes('office') || actLower.includes('photograph') || actLower.includes('investigate')) {
-      videoUrl = cinematicVideoLibrary[1];
-    } else if (locLower.includes('street') || locLower.includes('rain') || actLower.includes('walk')) {
-      videoUrl = cinematicVideoLibrary[0];
-    } else if (actLower.includes('car') || actLower.includes('drive')) {
-      videoUrl = cinematicVideoLibrary[3];
-    } else if (scene.camera?.shot?.toLowerCase().includes('close')) {
-      videoUrl = cinematicVideoLibrary[2];
-    } else {
-      const idx = (scene.sceneNumber || 1) % cinematicVideoLibrary.length;
-      videoUrl = cinematicVideoLibrary[idx];
-    }
-
-    return {
-      videoUrl,
-      provider: 'Cinematic Motion Engine (Live Action 24fps)',
-      duration: duration || scene.duration || 4,
-      motionPrompt: compiledMotionPrompt,
-    };
+    throw new Error(
+      'RUNWAY_API_KEY is not configured. Add it in Render Environment Variables.'
+    );
   }
 
-  async generateWithRunway({ imageUrl, motionPrompt, duration = 5 }) {
+  async generateWithRunway({
+    imageUrl,
+    motionPrompt,
+    duration = 5
+  }) {
+
     const response = await axios.post(
       'https://api.dev.runwayml.com/v1/image_to_video',
       {
+        model: 'gen4.5',
         promptImage: imageUrl,
         promptText: motionPrompt,
-        model: 'gen3a_turbo',
-        duration: duration,
-        watermark: false,
+        ratio: '1280:720',
+        duration: duration
       },
       {
         headers: {
-          'Authorization': `Bearer ${process.env.RUNWAY_API_KEY}`,
-          'X-Runway-Version': '2024-09-13',
-          'Content-Type': 'application/json',
+          Authorization: `Bearer ${process.env.RUNWAY_API_KEY}`,
+          'X-Runway-Version': '2024-11-06',
+          'Content-Type': 'application/json'
         },
-        timeout: 60000,
+        timeout: 120000
       }
     );
 
-    return {
-      taskId: response.data.id,
-      videoUrl: response.data.output?.[0] || '',
-      provider: 'Runway Gen-3 Alpha',
-      duration,
-    };
-  }
+    const taskId = response.data.id;
 
-  async generateWithKling({ imageUrl, motionPrompt, duration = 5 }) {
-    // Kling AI format integration
-    return {
-      videoUrl: imageUrl,
-      provider: 'Kling AI Video v1.5',
-      duration,
-    };
+    if (!taskId) {
+      throw new Error('Runway did not return a task ID');
+    }
+
+    // Wait for generated video
+    for (let i = 0; i < 60; i++) {
+
+      await new Promise(resolve => setTimeout(resolve, 5000));
+
+      const statusResponse = await axios.get(
+        `https://api.dev.runwayml.com/v1/tasks/${taskId}`,
+        {
+          headers: {
+            Authorization: `Bearer ${process.env.RUNWAY_API_KEY}`,
+            'X-Runway-Version': '2024-11-06'
+          }
+        }
+      );
+
+      const task = statusResponse.data;
+
+      console.log(
+        `[Runway] ${task.status} - ${i + 1}/60`
+      );
+
+      if (task.status === 'SUCCEEDED') {
+
+        const videoUrl =
+          task.output?.[0] ||
+          task.output?.video ||
+          '';
+
+        if (!videoUrl) {
+          throw new Error('Runway completed but returned no video URL');
+        }
+
+        return {
+          videoUrl,
+          provider: 'Runway Gen-4.5',
+          duration
+        };
+      }
+
+      if (
+        task.status === 'FAILED' ||
+        task.status === 'CANCELED'
+      ) {
+        throw new Error(
+          `Runway task ${task.status}: ${
+            task.failure || 'Unknown error'
+          }`
+        );
+      }
+    }
+
+    throw new Error('Runway video generation timed out');
   }
 }
 
