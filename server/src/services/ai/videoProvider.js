@@ -1,4 +1,9 @@
 const axios = require('axios');
+const fs = require('fs');
+const path = require('path');
+const { spawn } = require('child_process');
+const ffmpegPath = require('ffmpeg-static');
+const { v4: uuidv4 } = require('uuid');
 
 class VideoProvider {
 
@@ -10,124 +15,164 @@ class VideoProvider {
     duration = 5
   }) {
 
-    const cameraMotion = scene.camera?.movement || 'Slow Push-In';
+    if (!imageUrl) {
+      throw new Error('Scene image URL is missing');
+    }
+
+    const cameraMotion =
+      scene.camera?.movement || 'Slow Push-In';
+
     const actionDesc =
-      scene.action || 'Characters in a realistic cinematic live-action scene';
+      scene.action ||
+      'Characters in a realistic cinematic scene';
 
     const compiledMotionPrompt =
       `Cinematic live-action scene. ${actionDesc}. ` +
       `Camera movement: ${cameraMotion}. ` +
-      `Natural realistic motion, photorealistic, dramatic cinematic lighting. ` +
-      `${motionPrompt}`;
+      `Photorealistic cinematic motion. ${motionPrompt}`;
 
-    // REAL AI VIDEO GENERATION
-    if (process.env.RUNWAY_API_KEY) {
-      try {
-        return await this.generateWithRunway({
-          imageUrl,
-          motionPrompt: compiledMotionPrompt,
-          duration
-        });
-      } catch (err) {
-        console.error(
-          '[VideoProvider] Runway failed:',
-          err.response?.data || err.message
-        );
+    console.log('[VideoProvider] Creating free cinematic MP4');
+    console.log('[VideoProvider] Image:', imageUrl);
 
-        throw new Error(
-          'AI video generation failed. Please check RUNWAY_API_KEY.'
-        );
-      }
-    }
-
-    throw new Error(
-      'RUNWAY_API_KEY is not configured. Add it in Render Environment Variables.'
-    );
+    return await this.generateFreeCinematicVideo({
+      imageUrl,
+      duration,
+      motionPrompt: compiledMotionPrompt
+    });
   }
 
-  async generateWithRunway({
+  async generateFreeCinematicVideo({
     imageUrl,
-    motionPrompt,
     duration = 5
   }) {
 
-    const response = await axios.post(
-      'https://api.dev.runwayml.com/v1/image_to_video',
-      {
-        model: 'gen4.5',
-        promptImage: imageUrl,
-        promptText: motionPrompt,
-        ratio: '1280:720',
-        duration: duration
-      },
-      {
-        headers: {
-          Authorization: `Bearer ${process.env.RUNWAY_API_KEY}`,
-          'X-Runway-Version': '2024-11-06',
-          'Content-Type': 'application/json'
-        },
-        timeout: 120000
-      }
+    const uploadsDir = path.join(
+      __dirname,
+      '../../uploads/videos'
     );
 
-    const taskId = response.data.id;
+    fs.mkdirSync(uploadsDir, { recursive: true });
 
-    if (!taskId) {
-      throw new Error('Runway did not return a task ID');
-    }
+    const id = uuidv4();
 
-    // Wait for generated video
-    for (let i = 0; i < 60; i++) {
+    const imagePath = path.join(
+      uploadsDir,
+      `${id}.jpg`
+    );
 
-      await new Promise(resolve => setTimeout(resolve, 5000));
+    const videoPath = path.join(
+      uploadsDir,
+      `${id}.mp4`
+    );
 
-      const statusResponse = await axios.get(
-        `https://api.dev.runwayml.com/v1/tasks/${taskId}`,
-        {
-          headers: {
-            Authorization: `Bearer ${process.env.RUNWAY_API_KEY}`,
-            'X-Runway-Version': '2024-11-06'
-          }
-        }
+    // Download generated scene image
+    const response = await axios.get(imageUrl, {
+      responseType: 'arraybuffer',
+      timeout: 60000
+    });
+
+    fs.writeFileSync(
+      imagePath,
+      Buffer.from(response.data)
+    );
+
+    console.log('[VideoProvider] Image downloaded');
+
+    // Create 24fps cinematic motion video
+    await new Promise((resolve, reject) => {
+
+      const frames = Math.max(
+        1,
+        Math.round(duration * 24)
       );
 
-      const task = statusResponse.data;
+      const zoom =
+        `zoompan=z='min(zoom+0.0008,1.12)':` +
+        `x='iw/2-(iw/zoom/2)':` +
+        `y='ih/2-(ih/zoom/2)':` +
+        `d=${frames}:s=1280x720:fps=24`;
 
-      console.log(
-        `[Runway] ${task.status} - ${i + 1}/60`
-      );
+      const ffmpeg = spawn(ffmpegPath, [
+        '-y',
 
-      if (task.status === 'SUCCEEDED') {
+        '-loop',
+        '1',
 
-        const videoUrl =
-          task.output?.[0] ||
-          task.output?.video ||
-          '';
+        '-i',
+        imagePath,
 
-        if (!videoUrl) {
-          throw new Error('Runway completed but returned no video URL');
+        '-vf',
+        zoom,
+
+        '-t',
+        String(duration),
+
+        '-r',
+        '24',
+
+        '-c:v',
+        'libx264',
+
+        '-pix_fmt',
+        'yuv420p',
+
+        '-movflags',
+        '+faststart',
+
+        videoPath
+      ]);
+
+      let stderr = '';
+
+      ffmpeg.stderr.on('data', data => {
+        stderr += data.toString();
+      });
+
+      ffmpeg.on('error', reject);
+
+      ffmpeg.on('close', code => {
+
+        if (code === 0) {
+          resolve();
+        } else {
+          reject(
+            new Error(
+              `FFmpeg failed: ${stderr.slice(-1000)}`
+            )
+          );
         }
 
-        return {
-          videoUrl,
-          provider: 'Runway Gen-4.5',
-          duration
-        };
-      }
+      });
 
-      if (
-        task.status === 'FAILED' ||
-        task.status === 'CANCELED'
-      ) {
-        throw new Error(
-          `Runway task ${task.status}: ${
-            task.failure || 'Unknown error'
-          }`
-        );
-      }
+    });
+
+    // Remove temporary image
+    try {
+      fs.unlinkSync(imagePath);
+    } catch (err) {
+      console.warn(
+        '[VideoProvider] Could not remove temp image'
+      );
     }
 
-    throw new Error('Runway video generation timed out');
+    const baseUrl =
+      process.env.PUBLIC_BASE_URL ||
+      `http://localhost:${process.env.PORT || 5000}`;
+
+    const videoUrl =
+      `${baseUrl}/uploads/videos/${id}.mp4`;
+
+    console.log(
+      '[VideoProvider] Video created:',
+      videoUrl
+    );
+
+    return {
+      videoUrl,
+      provider: 'Free Cinematic Motion Engine',
+      duration,
+      fps: 24
+    };
   }
 }
 
