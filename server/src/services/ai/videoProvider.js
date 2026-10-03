@@ -65,7 +65,7 @@ class VideoProvider {
       `${id}.mp4`
     );
 
-    // Download generated scene image
+    // Download generated cinematic image
     const response = await axios.get(imageUrl, {
       responseType: 'arraybuffer',
       timeout: 60000
@@ -94,31 +94,22 @@ class VideoProvider {
 
       const ffmpeg = spawn(ffmpegPath, [
         '-y',
-
         '-loop',
         '1',
-
         '-i',
         imagePath,
-
         '-vf',
         zoom,
-
         '-t',
         String(duration),
-
         '-r',
         '24',
-
         '-c:v',
         'libx264',
-
         '-pix_fmt',
         'yuv420p',
-
         '-movflags',
         '+faststart',
-
         videoPath
       ]);
 
@@ -131,7 +122,6 @@ class VideoProvider {
       ffmpeg.on('error', reject);
 
       ffmpeg.on('close', code => {
-
         if (code === 0) {
           resolve();
         } else {
@@ -141,7 +131,6 @@ class VideoProvider {
             )
           );
         }
-
       });
 
     });

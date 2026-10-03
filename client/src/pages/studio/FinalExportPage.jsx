@@ -45,7 +45,7 @@ export const FinalExportPage = () => {
       trackJob(res.data.jobId, `Mastering & Rendering 4K Short Film: "${currentProject.title}"`, async (job) => {
         await refreshCurrentProject();
         setIsRendering(false);
-        const url = job.resultUrl || scenes.find((s) => s.videoUrl)?.videoUrl || 'https://assets.mixkit.co/videos/preview/mixkit-man-walking-down-a-dark-street-at-night-42617-large.mp4';
+       const url = job.resultUrl || scenes.find((s) => s.videoUrl)?.videoUrl || '';
         setExportedVideoUrl(url);
         addToast('🎉 Final short film successfully rendered and mastered in 4K!', 'success');
       });
@@ -55,7 +55,7 @@ export const FinalExportPage = () => {
     }
   };
 
-  const previewVideoUrl = exportedVideoUrl || scenes.find((s) => s.videoUrl)?.videoUrl || 'https://assets.mixkit.co/videos/preview/mixkit-man-walking-down-a-dark-street-at-night-42617-large.mp4';
+  const previewVideoUrl = exportedVideoUrl || scenes.find((s) => s.videoUrl)?.videoUrl || '';
 
   return (
     <div className="space-y-6 animate-fade-in pb-16">
